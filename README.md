@@ -6,3 +6,4 @@ gatuingparam.py -----> arquivo que contem a tunagem de parametros do ga
 gasingletest.py -----> arquivo que contem um teste único para os metodos de seleção, parametros já tunados. (execução rápida)
 ----
 gaselectoncomp.py -----> arquivo que contem um teste robusto com 30 interações para os metodos de seleção, parametros já tunados. (execução lenta)
+----
