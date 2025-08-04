@@ -2,9 +2,54 @@ import numpy as np
 import tsplib95
 import random
 import matplotlib.pyplot as plt
+import math
 
 # --------------------------------------------------------------------------
-# 1. FUNÇÕES AUXILIARES E DE CÁLCULO
+# 1. FUNÇÃO PARA PLOTAR A ROTA (NOVO)
+# --------------------------------------------------------------------------
+
+def plot_tour(problem, tour, title):
+    """
+    Plota o gráfico de uma rota do TSP.
+
+    Args:
+        problem (tsplib95.Problem): O objeto do problema para obter as coordenadas.
+        tour (list): A lista de índices de cidades que formam a rota.
+        title (str): O título do gráfico.
+    """
+    # Extrai as coordenadas do problema
+    # O dicionário é 1-based, então criamos uma lista 0-based para facilitar
+    coords = [problem.node_coords[i] for i in range(1, len(problem.node_coords) + 1)]
+    
+    plt.figure(figsize=(10, 8))
+    
+    # Plota as cidades como pontos
+    for i, (x, y) in enumerate(coords):
+        plt.scatter(x, y, color='blue', s=50)
+        plt.text(x + 0.5, y + 0.5, str(i + 1), fontsize=9) # Adiciona o número da cidade
+
+    # Plota as linhas da rota
+    for i in range(len(tour)):
+        from_city_idx = tour[i]
+        to_city_idx = tour[(i + 1) % len(tour)] # O % garante o retorno ao início
+        
+        # Pega as coordenadas
+        from_coord = coords[from_city_idx]
+        to_coord = coords[to_city_idx]
+        
+        # Desenha a linha
+        plt.plot([from_coord[0], to_coord[0]], [from_coord[1], to_coord[1]], 'r-')
+
+    plt.title(title, fontsize=16)
+    plt.xlabel("Coordenada X")
+    plt.ylabel("Coordenada Y")
+    plt.grid(True)
+    plt.gca().set_aspect('equal', adjustable='box') # Garante que a escala dos eixos seja a mesma
+    plt.show()
+
+
+# --------------------------------------------------------------------------
+# 2. FUNÇÕES AUXILIARES E DE CÁLCULO
 # --------------------------------------------------------------------------
 
 def calculate_total_distance(tour, distance_matrix):
@@ -12,111 +57,82 @@ def calculate_total_distance(tour, distance_matrix):
     total_distance = 0
     num_cities = len(tour)
     for i in range(num_cities):
-        # Pega a distância da cidade atual para a próxima
-        # O operador % garante que a última cidade se conecte à primeira
         from_city = tour[i]
         to_city = tour[(i + 1) % num_cities]
-        total_distance += distance_matrix[from_city][to_city]
+        total_distance += distance_matrix[from_city, to_city]
     return total_distance
 
-def get_distance_matrix(coords):
-    """Cria uma matriz de distâncias a partir das coordenadas das cidades."""
+def get_geo_distance_matrix(coords):
+    """Cria uma matriz de distâncias usando a fórmula para coordenadas geográficas (GEO)."""
     num_cities = len(coords)
     distance_matrix = np.zeros((num_cities, num_cities))
+    
+    def get_geo_distance(coord1, coord2):
+        PI = 3.141592
+        RRR = 6378.388
+        lat1_rad = PI * coord1[0] / 180.0
+        lon1_rad = PI * coord1[1] / 180.0
+        lat2_rad = PI * coord2[0] / 180.0
+        lon2_rad = PI * coord2[1] / 180.0
+        q1 = math.cos(lon1_rad - lon2_rad)
+        q2 = math.cos(lat1_rad - lat2_rad)
+        q3 = math.cos(lat1_rad + lat2_rad)
+        distance = int(RRR * math.acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0)
+        return distance
+
     for i in range(num_cities):
         for j in range(i, num_cities):
-            # Coordenadas são 1-based no tsplib, ajustamos para 0-based
-            dist = np.linalg.norm(np.array(coords[i+1]) - np.array(coords[j+1]))
-            distance_matrix[i][j] = distance_matrix[j][i] = dist
+            dist = get_geo_distance(coords[i+1], coords[j+1])
+            distance_matrix[i, j] = distance_matrix[j, i] = dist
+            
     return distance_matrix
 
-# --------------------------------------------------------------------------
-# 2. OPERADORES GENÉTICOS
-# --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# 3. OPERADORES GENÉTICOS E MÉTODOS DE SELEÇÃO
+# --------------------------------------------------------------------------
 def ordered_crossover(parent1, parent2):
-    """
-    Implementa o Ordered Crossover (OX1), eficaz para o PCV.
-    Garante que a rota filha seja sempre válida (sem cidades repetidas).
-    """
     size = len(parent1)
     child = [-1] * size
-    
-    # Seleciona um trecho aleatório do primeiro pai
     start, end = sorted([random.randint(0, size - 1) for _ in range(2)])
     child[start:end+1] = parent1[start:end+1]
-    
-    # Preenche o restante com os genes do segundo pai, na ordem que aparecem
     pointer = (end + 1) % size
     for gene in parent2:
         if gene not in child:
             child[pointer] = gene
             pointer = (pointer + 1) % size
-            
     return child
 
 def swap_mutation(tour, mutation_rate):
-    """
-    Implementa a mutação por troca (swap).
-    Troca a posição de duas cidades aleatórias na rota.
-    """
     if random.random() < mutation_rate:
         idx1, idx2 = random.sample(range(len(tour)), 2)
         tour[idx1], tour[idx2] = tour[idx2], tour[idx1]
     return tour
 
-# --------------------------------------------------------------------------
-# 3. ESTRATÉGIAS DE SELEÇÃO DE PAIS
-# --------------------------------------------------------------------------
-
-def tournament_selection(population, fitnesses, k=5):
-    """
-    Seleção por Torneio: seleciona k indivíduos e retorna o melhor deles.
-    """
-    # Seleciona k indivíduos aleatórios da população
+def tournament_selection(population, fitnesses, k=2):
     selection_ix = np.random.randint(len(population), size=k)
-    
-    # Encontra o melhor entre os selecionados
     best_ix = -1
     best_fitness = -1
     for ix in selection_ix:
         if fitnesses[ix] > best_fitness:
             best_fitness = fitnesses[ix]
             best_ix = ix
-            
     return population[best_ix]
 
 def proportional_roulette_wheel_selection(population, fitnesses):
-    """
-    Seleção por Roleta Proporcional: a chance de seleção é proporcional à aptidão.
-    """
     total_fitness = sum(fitnesses)
-    if total_fitness == 0: # Evita divisão por zero se todas as fitness forem 0
+    if total_fitness == 0:
         return random.choice(population)
-        
-    # Calcula as probabilidades de seleção
     probabilities = [f / total_fitness for f in fitnesses]
-    
-    # Usa a função `choice` do numpy que já implementa a lógica da roleta
     selected_index = np.random.choice(len(population), p=probabilities)
     return population[selected_index]
 
 def rank_based_roulette_wheel_selection(population, fitnesses):
-    """
-    Seleção por Roleta Baseada em Rank: a chance de seleção é baseada no ranking.
-    """
-    # Ordena os índices da população pela aptidão (do pior para o melhor)
     sorted_indices = np.argsort(fitnesses)
-    
-    # Cria os ranks (pior=1, melhor=N)
     ranks = np.empty_like(sorted_indices)
     ranks[sorted_indices] = np.arange(1, len(population) + 1)
-    
-    # Calcula a probabilidade baseada no rank
     total_rank = sum(ranks)
     probabilities = [r / total_rank for r in ranks]
-    
-    # Usa a função `choice` com as probabilidades do rank
     selected_index = np.random.choice(len(population), p=probabilities)
     return population[selected_index]
 
@@ -124,17 +140,28 @@ def rank_based_roulette_wheel_selection(population, fitnesses):
 # --------------------------------------------------------------------------
 # 4. CLASSE PRINCIPAL DO ALGORITMO GENÉTICO
 # --------------------------------------------------------------------------
-
 class GeneticAlgorithm:
-    def __init__(self, cities_coords, pop_size=100, mutation_rate=0.01, crossover_rate=0.9, generations=500):
+    def __init__(self, problem, pop_size=100, mutation_rate=0.01, crossover_rate=0.9, generations=500):
+        self.problem = problem
         self.pop_size = pop_size
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.generations = generations
-        self.distance_matrix = get_distance_matrix(cities_coords)
-        self.num_cities = len(cities_coords)
         
-        # Inicializa a população com rotas aleatórias
+        if self.problem.edge_weight_type == "GEO":
+            self.distance_matrix = get_geo_distance_matrix(self.problem.node_coords)
+        else:
+            def get_euc_2d_distance_matrix(coords):
+                num_cities = len(coords)
+                matrix = np.zeros((num_cities, num_cities))
+                for i in range(num_cities):
+                    for j in range(i, num_cities):
+                        dist = np.linalg.norm(np.array(coords[i+1]) - np.array(coords[j+1]))
+                        matrix[i, j] = matrix[j, i] = dist
+                return matrix
+            self.distance_matrix = get_euc_2d_distance_matrix(self.problem.node_coords)
+
+        self.num_cities = len(self.problem.node_coords)
         self.population = self._create_initial_population()
         
     def _create_initial_population(self):
@@ -146,116 +173,81 @@ class GeneticAlgorithm:
         return population
 
     def run(self, selection_strategy):
-        """Executa o ciclo do algoritmo genético."""
         best_overall_tour = None
         best_overall_distance = float('inf')
         history = []
-
-        print(f"Executando com a estratégia: {selection_strategy.__name__}")
-
         for gen in range(self.generations):
-            # 1. Avaliação (Fitness)
-            # Fitness é o inverso da distância (maior é melhor)
             distances = [calculate_total_distance(tour, self.distance_matrix) for tour in self.population]
-            fitnesses = [1 / d for d in distances]
-            
-            # 2. Guarda o melhor resultado da geração
-            best_current_distance = min(distances)
-            if best_current_distance < best_overall_distance:
-                best_overall_distance = best_current_distance
-                best_overall_tour = self.population[np.argmin(distances)]
-            
+            fitnesses = [1 / (d + 1e-10) for d in distances]
+            best_current_distance_idx = np.argmin(distances)
+            if distances[best_current_distance_idx] < best_overall_distance:
+                best_overall_distance = distances[best_current_distance_idx]
+                best_overall_tour = self.population[best_current_distance_idx]
             history.append(best_overall_distance)
-
-            # Imprime o progresso
-            if (gen + 1) % 50 == 0:
-                print(f"> Geração {gen+1}/{self.generations}, Melhor Distância: {best_overall_distance:.2f}")
-
-            # 3. Seleção e Reprodução
             new_population = []
             for _ in range(self.pop_size // 2):
-                # Seleciona os pais usando a ESTRATÉGIA FORNECIDA
                 parent1 = selection_strategy(self.population, fitnesses)
                 parent2 = selection_strategy(self.population, fitnesses)
-                
-                # Crossover
                 if random.random() < self.crossover_rate:
-                    child1 = ordered_crossover(parent1, parent2)
-                    child2 = ordered_crossover(parent2, parent1)
+                    child1, child2 = ordered_crossover(parent1, parent2), ordered_crossover(parent2, parent1)
                 else:
-                    child1, child2 = parent1, parent2
-                
-                # Mutação
-                child1 = swap_mutation(child1, self.mutation_rate)
-                child2 = swap_mutation(child2, self.mutation_rate)
-                
-                new_population.extend([child1, child2])
-            
+                    child1, child2 = parent1[:], parent2[:]
+                new_population.extend([
+                    swap_mutation(child1, self.mutation_rate),
+                    swap_mutation(child2, self.mutation_rate)
+                ])
             self.population = new_population
-            
         return best_overall_tour, best_overall_distance, history
 
 # --------------------------------------------------------------------------
-# 5. BLOCO DE EXECUÇÃO DO EXPERIMENTO
+# 5. BLOCO DE EXECUÇÃO DO EXPERIMENTO (MODIFICADO)
 # --------------------------------------------------------------------------
 if __name__ == '__main__':
-    # Carrega um problema da TSPLIB (usado no artigo)
-    # 🧠 Você pode trocar 'eil51' por 'berlin52', 'att48', etc.
-    problem = tsplib95.load('att48.tsp')
-    cities_coords = problem.node_coords
-    best_solution = {"att48": 10628, "berlin52": 7542, "eil51": 426, "pr76": 108159}
-    print(f"Problema: {problem.name}, Cidades: {len(cities_coords)}")
+    problem = tsplib95.load('burma14.tsp')
+    best_known = 3323
     
-    # Tenta obter a solução ótima do problema, se não, usa nosso dicionário
-    try:
-        best_known = problem.get_best_known()
-    except Exception:
-        best_known = best_solution.get(problem.name, 'Não disponível')
-        
+    print(f"Problema: {problem.name}, Cidades: {len(problem.node_coords)}")
+    print(f"Tipo de Distância: {problem.edge_weight_type}")
     print(f"Solução ótima conhecida: {best_known}")
     print("-" * 30)
 
-    # Parâmetros do AG
-    POP_SIZE = 150
+    POP_SIZE = len(problem.node_coords) * 10
     GENERATIONS = 500
-    MUTATION_RATE = 0.0017
-    CROSSOVER_RATE = 0.9541
+    MUTATION_RATE = 0.02 # Ajustado para um valor mais comum
+    CROSSOVER_RATE = 0.9 # Ajustado para um valor mais comum
     
-    # Lista das estratégias de seleção a serem testadas
-    selection_strategies = [
-        tournament_selection,
-        proportional_roulette_wheel_selection,
-        rank_based_roulette_wheel_selection
-    ]
+    # <--- MODIFICADO: Roda apenas com a melhor estratégia (Torneio) para simplificar
+    selection_strategy = tournament_selection
     
-    results_history = {}
-
-    # Executa o AG para cada estratégia
-    for strategy in selection_strategies:
-        ga = GeneticAlgorithm(cities_coords, pop_size=POP_SIZE, generations=GENERATIONS, mutation_rate=MUTATION_RATE, crossover_rate=CROSSOVER_RATE)
-        best_tour, best_dist, history = ga.run(selection_strategy=strategy)
+    # <--- ADICIONADO: Variáveis para guardar a melhor rota de todas
+    overall_best_tour = None
+    overall_best_distance = float('inf')
+    
+    print(f"Executando GA com a estratégia: {selection_strategy.__name__}")
+    
+    # Executa o AG uma vez para obter um resultado para plotar
+    ga = GeneticAlgorithm(problem, pop_size=POP_SIZE, generations=GENERATIONS, mutation_rate=MUTATION_RATE, crossover_rate=CROSSOVER_RATE)
+    best_tour, best_dist, history = ga.run(selection_strategy=selection_strategy)
+    
+    print(f"\n--- Resultados Finais do AG ---")
+    print(f"Melhor distância encontrada: {best_dist:.2f}")
+    error = ((best_dist - best_known) / best_known) * 100
+    print(f"Erro percentual: {error:.2f}%")
+    print("-" * 30)
         
-        strategy_name = strategy.__name__.replace("_selection", "").replace("_", " ").title()
-        results_history[strategy_name] = history
-        
-        print(f"\nMelhor resultado para '{strategy_name}':")
-        print(f"  Distância: {best_dist:.2f}")
-        # print(f"  Rota: {best_tour}") # Descomente para ver a rota
-        print("-" * 30)
-        
-    # Plotando os resultados
+    # --- Plota o gráfico de convergência ---
     plt.figure(figsize=(12, 7))
-    for name, history in results_history.items():
-        plt.plot(history, label=name)
-        
-    plt.title(f'Comparação das Estratégias de Seleção para o Problema "{problem.name}"')
+    plt.plot(history, label='GA (Tournament)')
+    plt.title(f'Convergência do AG para o Problema "{problem.name}"')
     plt.xlabel('Geração')
     plt.ylabel('Melhor Distância Encontrada')
     
-    # Adiciona a linha da solução ótima, se disponível
     if isinstance(best_known, (int, float)):
         plt.axhline(y=best_known, color='r', linestyle='--', label=f'Ótimo Conhecido ({best_known})')
         
     plt.legend()
     plt.grid(True)
     plt.show()
+
+    # --- ADICIONADO: Plota a melhor rota encontrada ---
+    plot_tour(problem, best_tour, f"Melhor Rota Encontrada pelo AG (Distância: {best_dist:.2f})")

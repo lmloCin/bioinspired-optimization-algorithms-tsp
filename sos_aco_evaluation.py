@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 # --- Bloco Principal: Geração e Análise dos Experimentos ---
 if __name__ == '__main__':
-    PROBLEM_NAME = 'att48' # Problema usado no artigo
+    PROBLEM_NAME = 'burma14' # Problema usado no artigo
     TSP_FILE = f"{PROBLEM_NAME}.tsp"
     N_RUNS = 30 # Número de execuções para robustez estatística
     

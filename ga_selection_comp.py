@@ -5,6 +5,8 @@ import time
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import math
+
 
 # --------------------------------------------------------------------------
 # 1. FUNÇÕES AUXILIARES E DE CÁLCULO (sem alterações)
@@ -54,6 +56,43 @@ def inversion_mutation(tour, mutation_rate):
         sub_tour = tour[start:end+1]
         tour[start:end+1] = sub_tour[::-1] # Inverte a subsequência
     return tour
+
+
+def get_geo_distance_matrix(coords):
+    """
+    Cria uma matriz de distâncias usando a fórmula para coordenadas geográficas (GEO).
+    """
+    num_cities = len(coords)
+    distance_matrix = np.zeros((num_cities, num_cities))
+    
+    def get_geo_distance(coord1, coord2):
+        """Calcula a distância geográfica entre duas coordenadas."""
+        PI = 3.141592
+        RRR = 6378.388
+        
+        # Converte de graus decimais para radianos
+        lat1_rad = PI * coord1[0] / 180.0
+        lon1_rad = PI * coord1[1] / 180.0
+        lat2_rad = PI * coord2[0] / 180.0
+        lon2_rad = PI * coord2[1] / 180.0
+
+        # Fórmula GEO do TSPLIB
+        q1 = math.cos(lon1_rad - lon2_rad)
+        q2 = math.cos(lat1_rad - lat2_rad)
+        q3 = math.cos(lat1_rad + lat2_rad)
+        
+        distance = int(RRR * math.acos(0.5 * ((1.0 + q1) * q2 - (1.0 - q1) * q3)) + 1.0)
+        return distance
+
+    for i in range(num_cities):
+        for j in range(i, num_cities):
+            # Coordenadas são 1-based no tsplib, acessamos com i+1 e j+1
+            dist = get_geo_distance(coords[i+1], coords[j+1])
+            distance_matrix[i, j] = distance_matrix[j, i] = dist
+            
+    return distance_matrix
+
+
 
 # <--- MUDANÇA 2: Tamanho do torneio (k) ajustado para 2
 def tournament_selection(population, fitnesses, k=2):
@@ -109,12 +148,29 @@ def rank_based_roulette_wheel_selection(population, fitnesses, selective_pressur
 # 3. CLASSE PRINCIPAL DO ALGORITMO GENÉTICO (GA)
 # --------------------------------------------------------------------------
 class GeneticAlgorithm:
-    def __init__(self, cities_coords, pop_size, mutation_rate, crossover_rate, generations):
+    def __init__(self, cities_coords, pop_size, mutation_rate, crossover_rate, generations, problem):
         self.pop_size = pop_size
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.generations = generations
+        self.problem = problem
         self.distance_matrix = get_distance_matrix(cities_coords)
+
+        # Verifica o tipo de distância e usa a função correta
+        if self.problem.edge_weight_type == "GEO":
+            self.distance_matrix = get_geo_distance_matrix(self.problem.node_coords)
+        else: # Assume EUC_2D para outros casos
+            # A sua função original get_distance_matrix foi renomeada para clareza
+            def get_euc_2d_distance_matrix(coords):
+                num_cities = len(coords)
+                matrix = np.zeros((num_cities, num_cities))
+                for i in range(num_cities):
+                    for j in range(i, num_cities):
+                        dist = np.linalg.norm(np.array(coords[i+1]) - np.array(coords[j+1]))
+                        matrix[i, j] = matrix[j, i] = dist
+                return matrix
+            self.distance_matrix = get_euc_2d_distance_matrix(self.problem.node_coords)
+
         self.num_cities = len(cities_coords)
         self.population = self._create_initial_population()
 
@@ -163,7 +219,7 @@ class GeneticAlgorithm:
 # --------------------------------------------------------------------------
 if __name__ == '__main__':
     N_RUNS = 30
-    PROBLEM_INSTANCES = ['att48']
+    PROBLEM_INSTANCES = ['burma14']
 
     selection_strategies = {
         "Tournament": tournament_selection,
@@ -184,7 +240,8 @@ if __name__ == '__main__':
             'pop_size': pop_size,
             'generations': 500, 
             'crossover_rate': 0.9541, 
-            'mutation_rate': 0.0017
+            'mutation_rate': 0.0017,
+            'problem': problem
         }
 
         print(f"\nProcessando instância: {instance_name} (População: {pop_size})")
