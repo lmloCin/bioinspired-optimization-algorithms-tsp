@@ -1,2 +1,5 @@
 # Python environment
 venv/
+
+# Other files to ignore
+__pycache__/
